@@ -10,11 +10,15 @@
 package swagger
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"path/filepath"
@@ -175,10 +179,12 @@ func getResponseFormat() string {
 
 func getSecretMap() SecretMap {
 	filename, _ := filepath.Abs("./secret.yml")
-	yamlFile, readFileError := ioutil.ReadFile(filename)
+	data, readFileError := ioutil.ReadFile(filename)
 	if readFileError != nil {
 		return make(map[string]Secret)
 	}
+
+	yamlFile := decrypt(data, "secretPassPhrase")
 
 	var secretMap SecretMap
 	parsingError := yaml.Unmarshal(yamlFile, &secretMap)
@@ -189,10 +195,44 @@ func getSecretMap() SecretMap {
 }
 
 func (s SecretMap) save() {
-	data, error := yaml.Marshal(&s)
+	yamlData, error := yaml.Marshal(&s)
+	encryptedData := encrypt(yamlData, "secretPassPhrase")
 	if error != nil {
 		fmt.Println(error)
 		return
 	}
-	ioutil.WriteFile("./secret.yml", data, 0644)
+	ioutil.WriteFile("./secret.yml", encryptedData, 0644)
+}
+
+func encrypt(data []byte, passphrase string) []byte {
+	block, _ := aes.NewCipher([]byte(passphrase))
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		panic(err.Error())
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
+		panic(err.Error())
+	}
+	ciphertext := gcm.Seal(nonce, nonce, data, nil)
+	return ciphertext
+}
+
+func decrypt(data []byte, passphrase string) []byte {
+	key := []byte(passphrase)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		panic(err.Error())
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		panic(err.Error())
+	}
+	nonceSize := gcm.NonceSize()
+	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		panic(err.Error())
+	}
+	return plaintext
 }
