@@ -73,6 +73,12 @@
 			"path": "github.com/prometheus/procfs",
 			"revision": "87a4384529e0652f5035fb5cc8095faf73ea9b0b",
 			"revisionTime": "2019-04-25T08:29:05Z"
+		},
+		{
+			"checksumSHA1": "QqDq2x8XOU7IoOR98Cx1eiV5QY8=",
+			"path": "gopkg.in/yaml.v2",
+			"revision": "51d6538a90f86fe93ac480b35f37b2be17fef232",
+			"revisionTime": "2018-11-15T11:05:04Z"
 		}
 	],
 	"rootPath": "secret-server-api/goapi/src"

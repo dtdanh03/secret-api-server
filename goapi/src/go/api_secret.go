@@ -10,15 +10,128 @@
 package swagger
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"net/http"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v2"
 )
 
+//SecretMap type
+type SecretMap map[string]Secret
+
 func AddSecret(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	secret := r.FormValue("secret")
+	remainingViews, expireAfterViewError := strconv.Atoi(r.FormValue("expireAfterViews"))
+	minutesUnitilExpire, expireTimeError := strconv.Atoi(r.FormValue("expireAfter"))
+
+	//Check input
+	if secret == "" || expireAfterViewError != nil || expireTimeError != nil {
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	//Create secret
+	hash := sha1.New()
+	currentTime := time.Now()
+	expireTime := currentTime.Add(time.Duration(minutesUnitilExpire) * time.Minute)
+	hash.Write([]byte(secret))
+	hash.Write([]byte(currentTime.String()))
+	hash.Write([]byte(expireTime.String()))
+	hashString := hex.EncodeToString(hash.Sum(nil))
+	fmt.Println(hashString)
+	newSecret := Secret{
+		Hash:           hashString,
+		SecretText:     secret,
+		CreatedAt:      currentTime,
+		ExpiresAt:      expireTime,
+		RemainingViews: int32(remainingViews),
+	}
+
+	json, err := json.Marshal(newSecret)
+	if err != nil {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	secretMap := getSecretMap()
+	secretMap[hashString] = newSecret
+	secretMap.save()
+
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	w.WriteHeader(http.StatusOK)
+	w.Write(json)
 }
 
 func GetSecretByHash(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.WriteHeader(http.StatusOK)
+	components := strings.Split(r.URL.Path, "/")
+	hash := components[len(components)-1]
+	secretMap := getSecretMap()
+
+	if secret, ok := secretMap[hash]; ok {
+		if time.Now().After(secret.ExpiresAt) {
+			delete(secretMap, hash)
+			secretMap.save()
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		if secret.RemainingViews <= 0 {
+			delete(secretMap, hash)
+			secretMap.save()
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		secret.RemainingViews--
+		fmt.Println(secret)
+		secretMap[secret.Hash] = secret
+		secretMap.save()
+
+		json, err := json.Marshal(secret)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write(json)
+
+	} else {
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+func getSecretMap() SecretMap {
+	filename, _ := filepath.Abs("./secret.yml")
+	yamlFile, readFileError := ioutil.ReadFile(filename)
+	if readFileError != nil {
+		return make(map[string]Secret)
+	}
+
+	var secretMap SecretMap
+	parsingError := yaml.Unmarshal(yamlFile, &secretMap)
+	if parsingError != nil {
+		return make(map[string]Secret)
+	}
+	return secretMap
+}
+
+func (s SecretMap) save() {
+	data, error := yaml.Marshal(&s)
+	if error != nil {
+		fmt.Println(error)
+		return
+	}
+	ioutil.WriteFile("./secret.yml", data, 0644)
 }
