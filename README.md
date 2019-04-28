@@ -1,1 +1,1 @@
-# secret-api-server
+# secret-server-api
