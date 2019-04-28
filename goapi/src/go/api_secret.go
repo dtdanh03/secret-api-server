@@ -13,6 +13,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -57,7 +58,15 @@ func AddSecret(w http.ResponseWriter, r *http.Request) {
 		RemainingViews: int32(remainingViews),
 	}
 
-	json, err := json.Marshal(newSecret)
+	var format responseFormat
+	switch getResponseFormat() {
+	case "xml":
+		format = xmlFormat{}
+	default:
+		format = jsonFormat{}
+	}
+
+	data, err := format.marshal(newSecret)
 	if err != nil {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -67,9 +76,9 @@ func AddSecret(w http.ResponseWriter, r *http.Request) {
 	secretMap[hashString] = newSecret
 	secretMap.save()
 
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	w.Header().Set("Content-Type", format.contentType())
 	w.WriteHeader(http.StatusOK)
-	w.Write(json)
+	w.Write(data)
 }
 
 func GetSecretByHash(w http.ResponseWriter, r *http.Request) {
@@ -97,19 +106,71 @@ func GetSecretByHash(w http.ResponseWriter, r *http.Request) {
 		secretMap[secret.Hash] = secret
 		secretMap.save()
 
-		json, err := json.Marshal(secret)
+		var format responseFormat
+		switch getResponseFormat() {
+		case "xml":
+			format = xmlFormat{}
+		default:
+			format = jsonFormat{}
+		}
+		data, err := format.marshal(secret)
 		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		w.Header().Set("Content-Type", format.contentType())
 		w.WriteHeader(http.StatusOK)
-		w.Write(json)
+		w.Write(data)
 
 	} else {
 		w.WriteHeader(http.StatusNotFound)
 	}
+}
+
+type responseFormat interface {
+	marshal(Secret) ([]byte, error)
+	contentType() string
+}
+
+type jsonFormat struct{}
+
+func (f jsonFormat) marshal(s Secret) ([]byte, error) {
+	return json.Marshal(s)
+}
+
+func (f jsonFormat) contentType() string {
+	return "application/json; charset=UTF-8"
+}
+
+type xmlFormat struct{}
+
+func (f xmlFormat) marshal(s Secret) ([]byte, error) {
+	return xml.MarshalIndent(s, "", " ")
+}
+
+func (f xmlFormat) contentType() string {
+	return "application/xml; charset=UTF-8"
+}
+
+func getResponseFormat() string {
+	filename, _ := filepath.Abs("./config.yml")
+	yamlFile, readFileError := ioutil.ReadFile(filename)
+	if readFileError != nil {
+		return "json"
+	}
+
+	var config map[string]string
+	parsingError := yaml.Unmarshal(yamlFile, &config)
+	if parsingError != nil {
+		return "json"
+	}
+
+	if format, ok := config["responseFormat"]; ok {
+		return format
+	}
+
+	return "json"
 }
 
 func getSecretMap() SecretMap {
