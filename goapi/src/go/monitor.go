@@ -13,7 +13,7 @@ func BuildSummaryVec(metricName string, metricHelp string) *prometheus.SummaryVe
 		prometheus.SummaryOpts{
 			Name:        metricName,
 			Help:        metricHelp,
-			ConstLabels: prometheus.Labels{"service": "secret-key-api"},
+			ConstLabels: prometheus.Labels{"service": "secret_key_api"},
 		},
 		[]string{"handler", "code"},
 	)
